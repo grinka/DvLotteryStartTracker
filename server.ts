@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import cron from "node-cron";
 import * as cheerio from "cheerio";
 import TelegramBot from "node-telegram-bot-api";
@@ -28,17 +29,48 @@ interface Status {
   lastChecked: string;
   message: string;
   isBotConfigured: boolean;
+  isPaused: boolean;
   checkInterval: number; // in seconds
   error?: string;
 }
 
 let users: TelegramUser[] = [];
+const USERS_FILE = path.join(process.cwd(), "users.json");
+
+function loadUsers() {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const data = fs.readFileSync(USERS_FILE, "utf-8");
+      users = JSON.parse(data);
+      console.log(`Loaded ${users.length} users from users.json`);
+    } else {
+      console.log("No users.json found, starting with empty list.");
+      users = [];
+    }
+  } catch (error) {
+    console.error("Error loading users:", error);
+    users = [];
+  }
+}
+
+function saveUsers() {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+    console.log(`Saved ${users.length} users to users.json`);
+  } catch (error) {
+    console.error("Error saving users:", error);
+  }
+}
+
+// Load users on startup
+loadUsers();
 
 let currentStatus: Status = {
   isOpen: false,
   lastChecked: "Never",
   message: "Initializing...",
   isBotConfigured: !!process.env.TELEGRAM_BOT_TOKEN,
+  isPaused: false,
   checkInterval: 3600, // Default to 1 hour
 };
 
@@ -72,6 +104,8 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
       user.firstName = firstName;
     }
 
+    saveUsers();
+
     bot?.sendMessage(chatId, `👋 Hello ${firstName || 'there'}! Welcome to the DV Lottery Monitor.\n\nYou are now subscribed to status change alerts.\n\nCommands:\n/status - Check current status\n/notify_every_check - Toggle notifications for every check\n/stop - Unsubscribe from alerts`);
   });
 
@@ -81,6 +115,7 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
     const user = users.find(u => u.chatId === chatId);
     if (user) {
       user.isActive = false;
+      saveUsers();
       bot?.sendMessage(chatId, "🔕 You have been unsubscribed. Send /start to subscribe again.");
     } else {
       bot?.sendMessage(chatId, "You are not currently subscribed.");
@@ -90,7 +125,7 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
   // Command: /status
   bot.onText(/\/status/, (msg) => {
     const chatId = msg.chat.id;
-    const statusMsg = `🔍 Current Status: ${currentStatus.message}\n🕒 Last Checked: ${currentStatus.lastChecked !== "Never" ? new Date(currentStatus.lastChecked).toLocaleString() : "Never"}`;
+    const statusMsg = `🔍 Current Status: ${currentStatus.message}\n🕒 Last Checked: ${currentStatus.lastChecked !== "Never" ? new Date(currentStatus.lastChecked).toLocaleString() : "Never"}\n⏸️ Monitor is currently: ${currentStatus.isPaused ? 'PAUSED' : 'RUNNING'}`;
     bot?.sendMessage(chatId, statusMsg);
   });
 
@@ -100,6 +135,7 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
     const user = users.find(u => u.chatId === chatId);
     if (user) {
       user.notifyEveryCheck = !user.notifyEveryCheck;
+      saveUsers();
       bot?.sendMessage(chatId, `🔔 Notifications for every check are now: ${user.notifyEveryCheck ? 'ON' : 'OFF'}`);
     } else {
       bot?.sendMessage(chatId, "Please send /start first to subscribe.");
@@ -111,6 +147,13 @@ async function checkDVLottery() {
   if (checkTimeout) {
     clearTimeout(checkTimeout);
     checkTimeout = null;
+  }
+
+  if (currentStatus.isPaused) {
+    console.log("Monitor is paused. Skipping check.");
+    // Still schedule next check to re-evaluate pause state
+    checkTimeout = setTimeout(checkDVLottery, currentStatus.checkInterval * 1000);
+    return;
   }
 
   console.log("Checking DV Lottery status via Stealth Browser...");
@@ -187,6 +230,7 @@ async function checkDVLottery() {
           console.error(`Telegram Error for user ${user.chatId}:`, tgError.message);
           if (tgError.message.includes("bot was blocked by the user")) {
             user.isActive = false;
+            saveUsers();
           }
         }
       }
@@ -232,6 +276,18 @@ async function startServer() {
 
   app.get("/api/users", (req, res) => {
     res.json(users);
+  });
+
+  app.post("/api/toggle-pause", (req, res) => {
+    currentStatus.isPaused = !currentStatus.isPaused;
+    console.log(`Monitor ${currentStatus.isPaused ? 'PAUSED' : 'RESUMED'}.`);
+    
+    // If resumed, trigger a check immediately
+    if (!currentStatus.isPaused) {
+      checkDVLottery();
+    }
+    
+    res.json({ success: true, isPaused: currentStatus.isPaused });
   });
 
   app.post("/api/settings", express.json(), (req, res) => {

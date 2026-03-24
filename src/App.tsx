@@ -15,6 +15,7 @@ interface Status {
   lastChecked: string;
   message: string;
   isBotConfigured: boolean;
+  isPaused: boolean;
   checkInterval: number;
   error?: string;
 }
@@ -24,6 +25,7 @@ export default function App() {
   const [users, setUsers] = useState<TelegramUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [pausing, setPausing] = useState(false);
   const [intervalInput, setIntervalInput] = useState<string>("");
 
   const fetchStatus = async () => {
@@ -42,6 +44,21 @@ export default function App() {
       console.error("Failed to fetch data:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const togglePause = async () => {
+    setPausing(true);
+    try {
+      const response = await fetch("/api/toggle-pause", { method: "POST" });
+      const data = await response.json();
+      if (status) {
+        setStatus({ ...status, isPaused: data.isPaused });
+      }
+    } catch (error) {
+      console.error("Failed to toggle pause:", error);
+    } finally {
+      setPausing(false);
     }
   };
 
@@ -182,13 +199,32 @@ export default function App() {
                     </div>
                   </div>
                   
-                  <button
-                    onClick={checkNow}
-                    disabled={refreshing}
-                    className="p-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={togglePause}
+                      disabled={pausing}
+                      className={`px-4 py-2 rounded-xl text-xs font-mono transition-all border ${
+                        status?.isPaused 
+                          ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20' 
+                          : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20'
+                      }`}
+                    >
+                      {pausing ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : status?.isPaused ? (
+                        'RESUME MONITOR'
+                      ) : (
+                        'PAUSE MONITOR'
+                      )}
+                    </button>
+                    <button
+                      onClick={checkNow}
+                      disabled={refreshing || status?.isPaused}
+                      className="p-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
