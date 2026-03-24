@@ -1,0 +1,5 @@
+{
+  "name": "DV Lottery Tracker",
+  "description": "Tracks the US Diversity Lottery entry period and sends Telegram notifications.",
+  "requestFramePermissions": []
+}
