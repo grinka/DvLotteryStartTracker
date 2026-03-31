@@ -169,11 +169,17 @@ async function checkDVLottery() {
         "--disable-setuid-sandbox",
         "--disable-blink-features=AutomationControlled",
         "--window-size=1920,1080",
-        `--user-agent=${userAgent}`
+        `--user-agent=${userAgent}`,
+        "--disable-infobars",
+        "--disable-notifications",
+        "--lang=en-US,en"
       ]
     });
     
     const page = await browser.newPage();
+    
+    // Set a consistent viewport
+    await page.setViewport({ width: 1920, height: 1080 });
     
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'en-US,en;q=0.9',
@@ -188,10 +194,15 @@ async function checkDVLottery() {
 
     // 1. Navigate and wait for "networkidle2" (allows most scripts to finish)
     console.log("Navigating to https://dvprogram.state.gov/ ...");
+    
+    // Add extra headers to the request specifically for the main navigation
     await page.goto("https://dvprogram.state.gov/", { 
-      waitUntil: "networkidle2",
+      waitUntil: "domcontentloaded", // Load faster, then wait
       timeout: 90000
     });
+
+    // Random delay after navigation
+    await new Promise(resolve => setTimeout(resolve, 3000 + Math.random() * 3000));
 
     console.log("Waiting for security check to resolve...");
 
