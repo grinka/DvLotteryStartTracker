@@ -184,12 +184,57 @@ async function checkDVLottery() {
     console.log("Navigating to https://dvprogram.state.gov/ ...");
     await page.goto("https://dvprogram.state.gov/", { 
       waitUntil: "networkidle2",
-      timeout: 60000 
+      timeout: 90000
     });
 
-    // 2. IMPORTANT: Wait for the Cloudflare "Managed Challenge" to settle
-    // We will wait up to 20 seconds for the challenge to pass automatically
     console.log("Waiting for security check to resolve...");
+
+    // 1. Loop to find and click the Cloudflare "Turnstile" checkbox
+    let attempts = 0;
+    while (attempts < 10) {
+      const frames = page.frames();
+      const challengeFrame = frames.find(f => f.url().includes('turnstile') || f.url().includes('cloudflare'));
+
+      if (challengeFrame) {
+        console.log("Found Cloudflare challenge frame. Attempting to click...");
+
+        // Find the checkbox inside the frame
+        const checkbox = await challengeFrame.$('input[type="checkbox"], #challenge-stage, .ctp-checkbox-label');
+        if (checkbox) {
+          const box = await checkbox.boundingBox();
+          if (box) {
+             // Click with a bit of randomness
+             await page.mouse.click(
+               box.x + box.width / 2 + (Math.random() * 4 - 2),
+               box.y + box.height / 2 + (Math.random() * 4 - 2)
+             );
+             console.log("Clicked the challenge checkbox!");
+             break; // Exit the loop if clicked
+          }
+        }
+      }
+
+      // If we see the actual site content, the challenge is already passed!
+      const content = await page.content();
+      if (content.toLowerCase().includes("begin entry")) {
+        console.log("Site loaded successfully (already passed challenge).");
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      attempts++;
+    }
+
+    // 2. Final check after the click/wait
+    const finalHtml = await page.content();
+    const $ = cheerio.load(finalHtml);
+    const lotteryOpen = finalHtml.toLowerCase().includes("begin entry");
+
+    if (!lotteryOpen && finalHtml.includes("challenge-error-text")) {
+      throw new Error("Stuck on Cloudflare challenge. Need to update stealth or wait longer.");
+    }
+
+    // IMPORTANT: Wait for the Cloudflare "Managed Challenge" to settle
+    // We will wait up to 20 seconds for the challenge to pass automatically
     await new Promise(resolve => setTimeout(resolve, 15000));
 
     // 3. Simulate minor human interaction to trigger "verification successful"
