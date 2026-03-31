@@ -159,24 +159,30 @@ async function checkDVLottery() {
   console.log("Checking DV Lottery status via Stealth Browser...");
   let browser;
   try {
+    // Launch with specific version-matched User-Agent
+    const userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
+
     browser = await puppeteer.launch({
-      headless: true, // If this fails, try "new" or "shell"
+      headless: true,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-blink-features=AutomationControlled",
         "--window-size=1920,1080",
-        "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        `--user-agent=${userAgent}`
       ]
     });
     
     const page = await browser.newPage();
     
-    // Instead of manual overrides, let the stealth plugin do its job
-    // But we will add some extra headers to look like a real Mac/PC
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'en-US,en;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'Upgrade-Insecure-Requests': '1',
       'Connection': 'keep-alive',
     });
 
@@ -217,6 +223,25 @@ async function checkDVLottery() {
               break;
             }
           } catch (e) {}
+        }
+
+        // NEW: Blind click in the center of the frame if selectors fail
+        if (attempts > 3 && attempts % 2 === 0) {
+           console.log("Attempting blind click in center of challenge frame...");
+           const frameBox = await page.evaluate((url) => {
+             const frame = Array.from(document.querySelectorAll('iframe')).find(f => f.src.includes(url));
+             if (!frame) return null;
+             const rect = frame.getBoundingClientRect();
+             return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+           }, 'turnstile');
+
+           if (frameBox) {
+             await page.mouse.click(
+               frameBox.x + frameBox.width / 2,
+               frameBox.y + frameBox.height / 2
+             );
+             console.log("Blind click dispatched.");
+           }
         }
       }
 
@@ -442,4 +467,3 @@ async function startServer() {
 }
 
 startServer();
-
