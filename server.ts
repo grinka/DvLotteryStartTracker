@@ -226,10 +226,10 @@ async function checkDVLottery() {
 
     // 2. Final check after the click/wait
     const finalHtml = await page.content();
-    const $ = cheerio.load(finalHtml);
-    const lotteryOpen = finalHtml.toLowerCase().includes("begin entry");
+    const $cheerio = cheerio.load(finalHtml);
+    const lotteryDetected = finalHtml.toLowerCase().includes("begin entry");
 
-    if (!lotteryOpen && finalHtml.includes("challenge-error-text")) {
+    if (!lotteryDetected && finalHtml.includes("challenge-error-text")) {
       throw new Error("Stuck on Cloudflare challenge. Need to update stealth or wait longer.");
     }
 
@@ -247,18 +247,18 @@ async function checkDVLottery() {
     
     // 4. Robust check for status
     const isStuckOnChallenge = html.includes("challenge-error-text") || html.includes("_cf_chl_opt");
-    const lotteryOpen = html.toLowerCase().includes("begin entry");
+    const isLotteryOpen = html.toLowerCase().includes("begin entry");
     const isOfficialSite = html.toLowerCase().includes("official strings") || html.toLowerCase().includes("electronic diversity visa");
 
     if (isStuckOnChallenge) {
       throw new Error("Stuck on Cloudflare challenge. Need to update stealth or wait longer.");
     }
 
-    if (!isOfficialSite && !lotteryOpen) {
+    if (!isOfficialSite && !isLotteryOpen) {
        throw new Error("Page content doesn't look like the DV Lottery site. Blocked?");
     }
 
-    const isOpen = lotteryOpen;
+    const isOpen = isLotteryOpen;
     if (!isOpen) {
       console.log("Begin Entry button not found. Checking for other indicators...");
       // Check if we are still stuck on Cloudflare
