@@ -160,32 +160,60 @@ async function checkDVLottery() {
   let browser;
   try {
     browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      headless: true, // If this fails, try "new" or "shell"
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--window-size=1920,1080",
+        "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+      ]
     });
     
     const page = await browser.newPage();
     
-    // Set a realistic user agent
-    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-    
-    // Navigate to the site
+    // Instead of manual overrides, let the stealth plugin do its job
+    // But we will add some extra headers to look like a real Mac/PC
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Connection': 'keep-alive',
+    });
+
+    // 1. Navigate and wait for "networkidle2" (allows most scripts to finish)
     console.log("Navigating to https://dvprogram.state.gov/ ...");
     await page.goto("https://dvprogram.state.gov/", { 
       waitUntil: "networkidle2",
       timeout: 60000 
     });
 
-    // Wait a bit for any JS challenges to resolve
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // 2. IMPORTANT: Wait for the Cloudflare "Managed Challenge" to settle
+    // We will wait up to 20 seconds for the challenge to pass automatically
+    console.log("Waiting for security check to resolve...");
+    await new Promise(resolve => setTimeout(resolve, 15000));
+
+    // 3. Simulate minor human interaction to trigger "verification successful"
+    await page.mouse.move(100, 100);
+    await page.mouse.wheel({ deltaY: 200 });
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     const html = await page.content();
     const $ = cheerio.load(html);
     
-    // Look for "Begin Entry" button
-    const beginEntryButton = $('a:contains("Begin Entry")');
-    const isOpen = beginEntryButton.length > 0 || html.includes("Begin Entry");
-    
+    // 4. Robust check for status
+    const isStuckOnChallenge = html.includes("challenge-error-text") || html.includes("_cf_chl_opt");
+    const lotteryOpen = html.toLowerCase().includes("begin entry");
+    const isOfficialSite = html.toLowerCase().includes("official strings") || html.toLowerCase().includes("electronic diversity visa");
+
+    if (isStuckOnChallenge) {
+      throw new Error("Stuck on Cloudflare challenge. Need to update stealth or wait longer.");
+    }
+
+    if (!isOfficialSite && !lotteryOpen) {
+       throw new Error("Page content doesn't look like the DV Lottery site. Blocked?");
+    }
+
+    const isOpen = lotteryOpen;
     if (!isOpen) {
       console.log("Begin Entry button not found. Checking for other indicators...");
       // Check if we are still stuck on Cloudflare
@@ -368,3 +396,4 @@ async function startServer() {
 }
 
 startServer();
+
