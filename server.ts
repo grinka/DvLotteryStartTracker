@@ -190,72 +190,73 @@ async function checkDVLottery() {
     console.log("Waiting for security check to resolve...");
 
     // 1. Loop to find and click the Cloudflare "Turnstile" checkbox
+    console.log("Searching for Cloudflare Turnstile...");
     let attempts = 0;
-    while (attempts < 10) {
+    while (attempts < 15) {
       const frames = page.frames();
-      const challengeFrame = frames.find(f => f.url().includes('turnstile') || f.url().includes('cloudflare'));
+      const challengeFrame = frames.find(f => f.url().includes('turnstile') || f.url().includes('cloudflare') || f.url().includes('captcha'));
 
       if (challengeFrame) {
-        console.log("Found Cloudflare challenge frame. Attempting to click...");
+        const selectors = ['input[type="checkbox"]', '#challenge-stage', '.ctp-checkbox-label', '.mark', '#challenge-form'];
+        
+        for (const selector of selectors) {
+          try {
+            const isVisible = await challengeFrame.evaluate((sel) => {
+              const el = document.querySelector(sel);
+              if (!el) return false;
+              const style = window.getComputedStyle(el);
+              return style && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+            }, selector);
 
-        // Find the checkbox inside the frame
-        const checkbox = await challengeFrame.$('input[type="checkbox"], #challenge-stage, .ctp-checkbox-label');
-        if (checkbox) {
-          const box = await checkbox.boundingBox();
-          if (box) {
-             // Click with a bit of randomness
-             await page.mouse.click(
-               box.x + box.width / 2 + (Math.random() * 4 - 2),
-               box.y + box.height / 2 + (Math.random() * 4 - 2)
-             );
-             console.log("Clicked the challenge checkbox!");
-             break; // Exit the loop if clicked
-          }
+            if (isVisible) {
+              console.log(`Found visible challenge element (${selector}). Clicking...`);
+              await challengeFrame.click(selector, { delay: Math.random() * 200 + 50 });
+              console.log("Click dispatched to challenge frame.");
+              // Give it a moment to react after click
+              await new Promise(resolve => setTimeout(resolve, 5000));
+              break;
+            }
+          } catch (e) {}
         }
       }
 
-      // If we see the actual site content, the challenge is already passed!
-      const content = await page.content();
-      if (content.toLowerCase().includes("begin entry")) {
-        console.log("Site loaded successfully (already passed challenge).");
+      // Check if we've already broken through
+      const currentHtml = await page.content();
+      if (currentHtml.toLowerCase().includes("begin entry") || currentHtml.toLowerCase().includes("check status")) {
+        console.log("Access granted! Site content detected.");
         break;
       }
-      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Fallback: Try Tab + Space if we seem stuck
+      if (attempts > 5 && attempts % 3 === 0) {
+        console.log("Attempting keyboard navigation fallback (Tab + Space)...");
+        await page.keyboard.press('Tab');
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await page.keyboard.press('Space');
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 4000));
       attempts++;
     }
 
-    // 2. Final check after the click/wait
-    const finalHtml = await page.content();
-    const $cheerio = cheerio.load(finalHtml);
-    const lotteryDetected = finalHtml.toLowerCase().includes("begin entry");
-
-    if (!lotteryDetected && finalHtml.includes("challenge-error-text")) {
-      throw new Error("Stuck on Cloudflare challenge. Need to update stealth or wait longer.");
-    }
-
-    // IMPORTANT: Wait for the Cloudflare "Managed Challenge" to settle
-    // We will wait up to 20 seconds for the challenge to pass automatically
-    await new Promise(resolve => setTimeout(resolve, 15000));
-
-    // 3. Simulate minor human interaction to trigger "verification successful"
-    await page.mouse.move(100, 100);
-    await page.mouse.wheel({ deltaY: 200 });
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // 2. Wait for final stabilization
+    console.log("Stabilizing page...");
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     const html = await page.content();
     const $ = cheerio.load(html);
     
-    // 4. Robust check for status
-    const isStuckOnChallenge = html.includes("challenge-error-text") || html.includes("_cf_chl_opt");
+    // 3. Robust check for status
+    const isStuckOnChallenge = html.includes("challenge-error-text") || html.includes("_cf_chl_opt") || html.includes("Enable JavaScript and cookies");
     const isLotteryOpen = html.toLowerCase().includes("begin entry");
-    const isOfficialSite = html.toLowerCase().includes("official strings") || html.toLowerCase().includes("electronic diversity visa");
+    const isOfficialSite = html.toLowerCase().includes("official strings") || html.toLowerCase().includes("electronic diversity visa") || html.toLowerCase().includes("dvprogram.state.gov");
 
-    if (isStuckOnChallenge) {
-      throw new Error("Stuck on Cloudflare challenge. Need to update stealth or wait longer.");
+    if (isStuckOnChallenge && !isLotteryOpen) {
+      throw new Error("Cloudflare challenge unresolved (JS/Cookie error visible).");
     }
 
     if (!isOfficialSite && !isLotteryOpen) {
-       throw new Error("Page content doesn't look like the DV Lottery site. Blocked?");
+       throw new Error("Page content does not match expected site (possibly blocked).");
     }
 
     const isOpen = isLotteryOpen;
